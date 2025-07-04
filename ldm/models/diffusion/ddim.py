@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from functools import partial
-
+import einops
 from ldm.modules.diffusionmodules.util import make_ddim_sampling_parameters, make_ddim_timesteps, noise_like, \
     extract_into_tensor
 
@@ -141,7 +141,6 @@ class DDIMSampler(object):
         print(f"Running DDIM Sampling with {total_steps} timesteps")
 
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
-
         for i, step in enumerate(iterator):
             index = total_steps - i - 1
             ts = torch.full((b,), step, device=device, dtype=torch.long)
@@ -151,7 +150,13 @@ class DDIMSampler(object):
                 img_orig = self.model.q_sample(x0, ts)  # TODO: deterministic forward pass?
                 img = img_orig * mask + (1. - mask) * img
 
-            outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
+            n_samples = b
+            # BUG: control.shape = (1, 1, 4, 64, 64), img.shape = (1, 4, 64, 64)
+            control = control = img.clone().float().cuda() / 255.0
+            control = torch.stack([control for _ in range(n_samples)], dim=0) # (1, 3, 512, 512)
+            control = control.squeeze(0)
+
+            outs = self.p_sample_ddim(img, cond, ts, control, index=index, use_original_steps=ddim_use_original_steps,
                                       quantize_denoised=quantize_denoised, temperature=temperature,
                                       noise_dropout=noise_dropout, score_corrector=score_corrector,
                                       corrector_kwargs=corrector_kwargs,
@@ -175,6 +180,7 @@ class DDIMSampler(object):
 
         if unconditional_conditioning is None or unconditional_guidance_scale == 1.:
             e_t = self.model.apply_model(x, t, c, control)
+            # e_t = self.model.apply_model(x, t, c)
         else:
             x_in = torch.cat([x] * 2)
             t_in = torch.cat([t] * 2)
@@ -184,6 +190,7 @@ class DDIMSampler(object):
                 c_in.append(torch.cat([unconditional_conditioning[i], c[i]]))
 
             e_t_uncond, e_t = self.model.apply_model(x_in, t_in, c_in[int(t*self.prospect_stages/1000):int(t*self.prospect_stages/1000)+3],control).chunk(2)
+            # e_t_uncond, e_t = self.model.apply_model(x_in, t_in, c_in[int(t*self.prospect_stages/1000):int(t*self.prospect_stages/1000)+3]).chunk(2)
             e_t = e_t_uncond + unconditional_guidance_scale * (e_t - e_t_uncond)
 
         if score_corrector is not None:

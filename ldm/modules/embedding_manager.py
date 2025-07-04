@@ -113,13 +113,10 @@ class EmbeddingManager(nn.Module):
                 print('Working with NO IMGAE mode')
                 placeholder_embedding = self.get_embedding_for_tkn('').unsqueeze(0).repeat(self.max_vectors_per_token, 1).to(device)
             else:
-                print('Working with IMGAE GUIDING mode')
+                # print('Working with IMGAE GUIDING mode')
                 # print(self.initial_embeddings.view(b,1,768).to(device).size())
                 # print(self.initial_embeddings.view(b,1,768).to(device).requires_grad)
                 placeholder_embedding = self.attention(self.initial_embeddings.view(b,1,768).to(device), self.initial_embeddings.view(b,1,768).to(device))[-1].view(self.max_vectors_per_token,768)
-                # print(placeholder_embedding.size()) 10 1 768 利用attention直接输出10个维度的可学习参数
-                # for param in self.attention.parameters():
-                #     print(param)
             
             self.placeholder_embedding = placeholder_embedding
             # self.placeholder_embeddings=[]
@@ -143,7 +140,7 @@ class EmbeddingManager(nn.Module):
                         if isinstance(prospect_words[i],str):
                             words = prospect_words[i].split(' ')
                             if len(words)==1:
-                                if words[0] is not '*':
+                                if words[0] != '*':
                                     none_word_token = self.get_token_for_string(words[0]).to(device)
                                     with torch.no_grad():
                                         new_word_embedding = self.get_embedding_for_tkn(none_word_token).to(device)
@@ -153,7 +150,7 @@ class EmbeddingManager(nn.Module):
                                     self.embedded_texts[i]=new_embedded_text
                             else:
                                 for j in range(len(words)):     
-                                    if words[j] is not '*': 
+                                    if words[j] != '*': 
                                         none_word_token = self.get_token_for_string(words[j]).to(device)
                                         with torch.no_grad():
                                             new_word_embedding = self.get_embedding_for_tkn(none_word_token).to(device)
@@ -178,8 +175,6 @@ class EmbeddingManager(nn.Module):
                         elif isinstance(prospect_words[i],int):
                                 new_embedded_text = self.embedded_texts[prospect_words[i]].clone().to(device) 
                                 self.embedded_texts[i]=new_embedded_text
-        # print(len(self.embedded_texts))
-        # print(self.embedded_texts[0].size())
         return self.embedded_texts
 
     def save(self, ckpt_path):

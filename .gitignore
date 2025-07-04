@@ -1,0 +1,16 @@
+/data/
+/latent_diffusion.egg-info/
+**/__pycache__/
+*.pyc
+*.pyc
+/models/
+/logs/
+/outputs/
+/taming/
+*.pth
+*.pt
+*.ckpt
+*.json
+*.yaml
+*.yml
+*.log

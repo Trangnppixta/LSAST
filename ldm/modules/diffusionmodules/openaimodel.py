@@ -756,9 +756,14 @@ class UNetModel(nn.Module):
             h = self.middle_block(h, emb, context[1])
 
         if control is not None:
-            h += control.pop()
+            # control = control.unsqueeze(0)
+            # BUG: h.shape = (1, 1280, 8, 8), control.shape = (1, 4, 64, 64)
+            # control = torch.zeros(1, 1280, 8, 8)
+            
+            # h += control
             for i, module in enumerate(self.output_blocks):
-                h = torch.cat([h, hs.pop() + control.pop()], dim=1)
+                # h = torch.cat([h, hs.pop() + control], dim=1)
+                h = torch.cat([h, hs.pop()], dim=1)
                 h = module(h, emb, context[2])
         else:
             for i, module in enumerate(self.output_blocks):

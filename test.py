@@ -22,13 +22,25 @@ from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 from transformers import CLIPProcessor, CLIPModel
 from cldm.model import create_model, load_state_dict
+import re
+
+seed = 42
+strength = 0.8
+ddim_steps = 50
+low_threshold = 100
+high_threshold = 200
+# prompt = 'a brown short-haired woman'
+# contentdir = "data/test_data/woman1.jpg"
+contentdir = "/mnt/md0/projects/ai_headshot/style_transfer_data/content-image/123753_3/w2.jpg"
+embed_dir = "logs/train2025-06-30-08-01-09_v1-finetune/testtube/version_0/checkpoints/embeddings_gs-26999.pt"
+n_samples = 1
+
 class CannyDetector:
     def __call__(self, img, low_threshold, high_threshold):
         return cv2.Canny(img, low_threshold, high_threshold)
 apply_canny = CannyDetector()
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-cpu=torch.device("cpu")
 
 def chunk(it, size):
     it = iter(it)
@@ -65,6 +77,7 @@ def load_img(path):
     image = image[None].transpose(0, 3, 1, 2)
     image = torch.from_numpy(image)
     return 2.*image - 1.
+
 config="configs/stable-diffusion/v1-inference.yaml"
 ckpt="models/sd1.5/v1-5-pruned.ckpt"
 config = OmegaConf.load(f"{config}")
@@ -77,10 +90,11 @@ def main(prompt='', content_dir=None, ddim_steps=50, strength=0.5, ddim_eta=0.0,
          scale=10.0, \
          model=None, seed=42, prospect_words=None, n_samples=1, height=512, width=512):
     precision = "autocast"
-    outdir = "outputs/comparison-ukiyoe-0.7"
+    outdir = "outputs/comparison"
     seed_everything(seed)
     controlnet_canny = create_model(
         './configs/controlnet/control_canny.yaml')
+    controlnet_canny = controlnet_canny.to(device)
     model_resume_state = torch.load(canny_model_path, map_location='cpu')
     os.makedirs(outdir, exist_ok=True)
     outpath = outdir
@@ -112,7 +126,7 @@ def main(prompt='', content_dir=None, ddim_steps=50, strength=0.5, ddim_eta=0.0,
 
     precision_scope = autocast if precision == "autocast" else nullcontext
     with torch.no_grad():
-        with precision_scope("cuda"):
+        with precision_scope(device.type):
             with model.ema_scope():
                 tic = time.time()
                 all_samples = list()
@@ -120,7 +134,8 @@ def main(prompt='', content_dir=None, ddim_steps=50, strength=0.5, ddim_eta=0.0,
                     for prompts in tqdm(data, desc="data"):
                         uc = None
                         if scale != 1.0:
-                            uc = model.get_learned_conditioning(batch_size * [""])
+                            uc = model.get_learned_conditioning(batch_size * [""])                            
+                            
                         if isinstance(prompts, tuple):
                             prompts = list(prompts)
                         
@@ -128,13 +143,14 @@ def main(prompt='', content_dir=None, ddim_steps=50, strength=0.5, ddim_eta=0.0,
                         img = cv2.imread(content_dir)
                         img = cv2.resize(img, (512, 512))
                         # H, W, C = img.shape
-                        detected_map = apply_canny(img, 100, 200)  # 100  200
-                        # cv2.imwrite('out.png', detected_map)
+                        detected_map = apply_canny(img, low_threshold, high_threshold)
+                        name = content_name + '-' + str(low_threshold) + '-' + str(high_threshold) + '.png'
+                        cv2.imwrite(name, detected_map)
                         image = detected_map[:, :, None]
                         image = np.concatenate([image, image, image], axis=2)
                         # img1 = rearrange(detected_map, 'h w c ->c h w')
 
-                        control = torch.from_numpy(image.copy()).float().cuda() / 255.0
+                        control = torch.from_numpy(image.copy()).float().to(device) / 255.0
 
                         control = torch.stack([control for _ in range(n_samples)], dim=0)
                         control = einops.rearrange(control, 'b h w c -> b c h w').clone()
@@ -145,14 +161,6 @@ def main(prompt='', content_dir=None, ddim_steps=50, strength=0.5, ddim_eta=0.0,
                                 new_state_dict[new_key] = value
                         controlnet_canny.load_state_dict(new_state_dict)
                         controlnet_canny = controlnet_canny.to(device)
-                        # print("c",len(c))
-                        # print("c",c[0].size())
-                        # dsa
-                        # img2img
-                        # t_enc = int(strength * 1000)
-                        # x_noisy = model.q_sample(x_start=init_latent, t=torch.tensor([t_enc] * batch_size).to(device))
-                        # model_output = model.apply_model(x_noisy, torch.tensor([t_enc] * batch_size).to(device), c)
-                        # z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device), noise=model_output, use_original_steps=True)
 
                         z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device))
                         t_enc = int(strength * ddim_steps)
@@ -176,26 +184,44 @@ def main(prompt='', content_dir=None, ddim_steps=50, strength=0.5, ddim_eta=0.0,
                 grid = 255. * rearrange(grid, 'c h w -> h w c').cpu().numpy()
                 output = Image.fromarray(grid.astype(np.uint8))
                                 # output.save(os.path.join(outpath, content_name+'-'+prompt+f'-{grid_count:04}.png'))
-                output.save(os.path.join(outpath, content_name + 'stylized.jpg'))
+                match = re.search(r'(gs-\d+)', embed_dir)
+                if match:
+                    result = match.group(1)
+                code = result + '-' + str(seed) + '-' + str(strength) + '-' + str(ddim_steps)
+                output.save(os.path.join(outpath, content_name + "-" + code + '.jpg'))
                 grid_count += 1
 
                 toc = time.time()
     return output 
-model.cpu()
-model.embedding_manager.load('./logs/berthe-morisot2023-12-25T08-48-51_test/checkpoints/embeddings_gs-99999.pt')
+
+model.embedding_manager.load(embed_dir)
+model.embedding_manager.to(device)
 model = model.to(device)
-for i in range(2650):
-    contentdir = "./comparison/" + str(i) + ".jpg"
-    # main(prompt = '*', content_dir = contentdir, style_dir = contentdir, ddim_steps = 50, strength = 0.7, seed=42, model = model)
-    main(prompt = '*', \
-     content_dir = contentdir, \
-     ddim_steps = 50, \
-     strength = 0.7, \
-     seed=41, \
-     height = 512, \
-     width = 768, \
-     prospect_words = ['*'],
-     model = model,\
-     )
+
+if hasattr(model, "embedding_manager"):
+    model.embedding_manager = model.embedding_manager.to(device)
+if hasattr(model, "cond_stage_model"):
+    model.cond_stage_model = model.cond_stage_model.to(device)
+if hasattr(model.cond_stage_model, "transformer"):
+    model.cond_stage_model.transformer = model.cond_stage_model.transformer.to(device)
+if hasattr(model.cond_stage_model, "text_model"):
+    model.cond_stage_model.text_model = model.cond_stage_model.text_model.to(device)
+if hasattr(model.cond_stage_model, "embeddings"):
+    model.cond_stage_model.embeddings = model.cond_stage_model.embeddings.to(device)
+if hasattr(model.cond_stage_model, "token_embedding"):
+    model.cond_stage_model.token_embedding = model.cond_stage_model.token_embedding.to(device)
+
+# main(prompt = '*', content_dir = contentdir, style_dir = contentdir, ddim_steps = 50, strength = 0.7, seed=42, model = model)
+main(prompt = '*', \
+    content_dir = contentdir, \
+    ddim_steps = ddim_steps, \
+    strength = strength, \
+    seed=seed, \
+    height = 512, \
+    width = 768, \
+    prospect_words = ['*'],
+    model = model,\
+    n_samples=n_samples, \
+    )
     
 

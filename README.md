@@ -153,7 +153,7 @@ For packages, see environment.yaml.
                --gpus 0, 
                --data_root /path/to/directory/with/images
 
-   python main.py --base configs/stable-diffusion/v1-finetune.yaml -t --actual_resume ./models/sd1.5/v1-5-pruned.ckpt -n test --gpus 0, --data_root ./Artworks/paul-gauguin
+   python main.py --base configs/stable-diffusion/v1-finetune.yaml -t --actual_resume ./models/sd1.5/v1-5-pruned.ckpt -n test --gpus 0,1 --data_root data/pixta_data/123753_1 --no-test True
    ```
   
  
